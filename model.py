@@ -1,4 +1,5 @@
 import os
+import sys
 from pprint import pprint
 
 import numpy as np
@@ -7,6 +8,14 @@ import tensorflow as tf
 
 tf.logging.set_verbosity(tf.logging.INFO)
 directory = 'kinect_head_pose_db\\hpdb\\'
+
+
+def get_predict_data(filepath=sys.argv[1]):
+    image_string = tf.read_file(filepath)
+    image_decoded = tf.image.decode_png(image_string)
+    image_resized = tf.image.resize_images(image_decoded, [64, 64])
+    dataset = tf.data.Dataset.from_tensors(image_resized)
+    return dataset
 
 
 def _parse_function(filename, label):
@@ -21,7 +30,7 @@ def get_datasets_train():
     filenames = []
     labels = []
     folder_counter = sum([len(d) for r, d, folder in os.walk(directory)])
-    for i in range(1, 2):  # folder_counter - 4):
+    for i in range(1, folder_counter - 4):
         print("i" + str(i))
         subdirect = directory + '{:02}'.format(i) + "\\"
         try:
@@ -181,23 +190,16 @@ def cnn_model_fn(features, labels, mode):
     logits = tf.layers.dense(inputs=full_layer2, units=9)
     print("try")
     print(conv5)
-    predictions = {
-        'probabilities': tf.nn.sigmoid(logits, name="sigmoid_tensor"),
-        'logits': logits
-    }
 
     if mode == tf.estimator.ModeKeys.PREDICT:
-        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
+        return tf.estimator.EstimatorSpec(mode=mode, predictions=logits)
     loss = tf.losses.sigmoid_cross_entropy(multi_class_labels=labels, logits=logits)
 
     if mode == tf.estimator.ModeKeys.TRAIN:
-        optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.0000001)
-        train_op = optimizer.minimize(
-            loss=loss,
-            global_step=tf.train.get_global_step())
+        optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.001)
+        train_op = optimizer.minimize(loss=loss, global_step=tf.train.get_global_step())
         return tf.estimator.EstimatorSpec(mode=mode, loss=loss, train_op=train_op)
-    eval_metric_ops = {"accuracy": tf.metrics.accuracy(labels=labels, predictions=predictions["logits"])}
-    tf.summary.scalar('accuracy', eval_metric_ops["accuracy"])
+    eval_metric_ops = {"precision": tf.metrics.precision(labels=labels, predictions=logits)}
 
     if mode == tf.estimator.ModeKeys.EVAL:
         return tf.estimator.EstimatorSpec(mode=mode, loss=loss, eval_metric_ops=eval_metric_ops)
@@ -208,19 +210,26 @@ def main(unused):
     head_pose_classifier = tf.estimator.Estimator(
         model_fn=cnn_model_fn,
         model_dir="C:\\Users\\Hermann\\PycharmProjects\\BachelorArbeit_Headpose Estimation\\tmp\\model")
-
-    print('Set up logging for predictions')
-    print('Log the values in the "Sigmoid" tensor with label "probabilities"')
-    tensors_to_log = {"probabilities": "sigmoid_tensor"}
-    logging_hook = tf.train.LoggingTensorHook(tensors=tensors_to_log, every_n_iter=50)
-    print('Train the model')
-    head_pose_classifier.train(
-        input_fn=get_datasets_train,
-        steps=200,  # 20000
-        hooks=[logging_hook])
-    print("Evaluate the Model")
-    eval_results = head_pose_classifier.evaluate(input_fn=get_datasets_eval)
-    print(eval_results)
+    if len(sys.argv) <= 1:
+        print('Set up logging for predictions')
+        print('Log the values in the "Sigmoid" tensor with label "probabilities"')
+        tensors_to_log = {"probabilities": "sigmoid_tensor"}
+        logging_hook = tf.train.LoggingTensorHook(tensors=tensors_to_log, every_n_iter=50)
+        print('Train the model')
+        head_pose_classifier.train(
+            input_fn=get_datasets_train,
+            steps=20000,
+            hooks=[logging_hook])
+        print("Evaluate the Model")
+        eval_results = head_pose_classifier.evaluate(input_fn=get_datasets_eval)
+        print(eval_results)
+    if len(sys.argv) == 2 and sys.argv[1].endswith(".png"):
+        print("Predict the Rotation!")
+        prediction = head_pose_classifier.predict(input_fn=get_predict_data)
+        for p in prediction:
+            print(p)
+    else:
+        print("ERROR:To Many Argumts were given or not a PNG!")
 
 
 if __name__ == "__main__":
