@@ -7,11 +7,11 @@ import pandas as pd
 import tensorflow as tf
 
 tf.logging.set_verbosity(tf.logging.INFO)
-directory = 'kinect_head_pose_db\\hpdb\\'
+directory = 'kinect_head_pose_db/hpdb/'
 
 
-def get_predict_data(filepath=sys.argv[1]):
-    image_string = tf.read_file(filepath)
+def get_predict_data():
+    image_string = tf.read_file(sys.argv[1])
     image_decoded = tf.image.decode_png(image_string)
     image_resized = tf.image.resize_images(image_decoded, [64, 64])
     dataset = tf.data.Dataset.from_tensors(image_resized)
@@ -32,7 +32,7 @@ def get_datasets_train():
     folder_counter = sum([len(d) for r, d, folder in os.walk(directory)])
     for i in range(1, folder_counter - 4):
         print("i" + str(i))
-        subdirect = directory + '{:02}'.format(i) + "\\"
+        subdirect = directory + '{:02}'.format(i) + "/"
         try:
             for filename in os.listdir(subdirect):
                 if filename.endswith("_pose.txt"):
@@ -68,7 +68,7 @@ def get_datasets_test():
     folder_counter = sum([len(d) for r, d, folder in os.walk(directory)])
     for i in range(folder_counter - 4, folder_counter):
         print("i" + str(i))
-        subdirect = directory + '{:02}'.format(i) + "\\"
+        subdirect = directory + '{:02}'.format(i) + "/"
         try:
             for filename in os.listdir(subdirect):
                 if filename.endswith("_pose.txt"):
@@ -104,7 +104,7 @@ def get_datasets_eval():
     folder_counter = sum([len(d) for r, d, folder in os.walk(directory)])
     for i in range(folder_counter, folder_counter + 1):
         print("i" + str(i))
-        subdirect = directory + '{:02}'.format(i) + "\\"
+        subdirect = directory + '{:02}'.format(i) + "/"
         try:
             for filename in os.listdir(subdirect):
                 if filename.endswith("_pose.txt"):
@@ -188,18 +188,20 @@ def cnn_model_fn(features, labels, mode):
         inputs=dense, rate=0.4, training=mode == tf.estimator.ModeKeys.TRAIN)
     full_layer2 = tf.layers.dense(inputs=dropout, units=84)
     logits = tf.layers.dense(inputs=full_layer2, units=9)
-    print("try")
-    print(conv5)
+
+    predictions = {'Predictions': tf.reshape(tensor=logits, shape=[-1, 3, 3], name="shaped_tensor")}
 
     if mode == tf.estimator.ModeKeys.PREDICT:
-        return tf.estimator.EstimatorSpec(mode=mode, predictions=logits)
-    loss = tf.losses.sigmoid_cross_entropy(multi_class_labels=labels, logits=logits)
+        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
+    loss = tf.losses.mean_squared_error(labels=labels, predictions=logits)
 
     if mode == tf.estimator.ModeKeys.TRAIN:
-        optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.001)
+        optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.01)
         train_op = optimizer.minimize(loss=loss, global_step=tf.train.get_global_step())
         return tf.estimator.EstimatorSpec(mode=mode, loss=loss, train_op=train_op)
-    eval_metric_ops = {"precision": tf.metrics.precision(labels=labels, predictions=logits)}
+    eval_metric_ops = {
+        "Root Mean Square Error": tf.metrics.root_mean_squared_error(labels=labels,
+                                                                     predictions=tf.cast(logits, dtype=tf.float64))}
 
     if mode == tf.estimator.ModeKeys.EVAL:
         return tf.estimator.EstimatorSpec(mode=mode, loss=loss, eval_metric_ops=eval_metric_ops)
@@ -209,17 +211,18 @@ def main(unused):
     print('Create the Estimator')
     head_pose_classifier = tf.estimator.Estimator(
         model_fn=cnn_model_fn,
-        model_dir="C:\\Users\\Hermann\\PycharmProjects\\BachelorArbeit_Headpose Estimation\\tmp\\model")
+        model_dir="tmp/model")
     if len(sys.argv) <= 1:
-        print('Set up logging for predictions')
-        print('Log the values in the "Sigmoid" tensor with label "probabilities"')
-        tensors_to_log = {"probabilities": "sigmoid_tensor"}
+        # print('Set up logging for predictions')
+        # print('Log the values in the "Sigmoid" tensor with label "probabilities"')
+        tensors_to_log = {"Predictions": "shaped_tensor"}
         logging_hook = tf.train.LoggingTensorHook(tensors=tensors_to_log, every_n_iter=50)
         print('Train the model')
         head_pose_classifier.train(
             input_fn=get_datasets_train,
-            steps=20000,
-            hooks=[logging_hook])
+            max_steps=20000,
+            hooks=[logging_hook]
+        )
         print("Evaluate the Model")
         eval_results = head_pose_classifier.evaluate(input_fn=get_datasets_eval)
         print(eval_results)
@@ -227,8 +230,8 @@ def main(unused):
         print("Predict the Rotation!")
         prediction = head_pose_classifier.predict(input_fn=get_predict_data)
         for p in prediction:
-            print(p)
-    else:
+            pprint(p)
+    if len(sys.argv) > 2:
         print("ERROR:To Many Argumts were given or not a PNG!")
 
 
